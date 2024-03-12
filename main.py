@@ -8,6 +8,7 @@ import requests
 import re
 from youtube_search import YoutubeSearch
 import json
+import pytube
 from pytube import YouTube
 from moviepy.editor import AudioFileClip
 
@@ -23,37 +24,41 @@ def authenticate_spotipy():
 
 
 def get_spotify_data(sp, search_query):
-    # Search for the track on Spotify
-    result = sp.search(q=search_query, limit=1, type='track')
-    if result['tracks']['items']:
-        # Get the first track from the search results
-        track = result['tracks']['items'][0]
-
-        # Get additional track details using the track ID
-        track_id = track['id']
-        track_details = sp.track(track_id)
-
-        # Get detailed audio features for the track
-        audio_features = sp.audio_features(track_id)[0]
-
-        # Organize the data into a dictionary
-        track_data = {
-            'artist': track['artists'][0]['name'],
-            'title': track['name'],
-            'album': track['album']['name'],
-            'release_date': track['album']['release_date'],
-            'release_date_precision': track['album']['release_date_precision'],
-            'year': track['album']['release_date'].split('-')[0],
-            'genre': sp.artist(track['artists'][0]['id'])['genres'],
-            'bpm': audio_features['tempo'],
-            'energy': audio_features['energy'],
-            'album_art_url': track['album']['images'][0]['url'] if track['album']['images'] else None,
-            # ... include other fields you're interested in
-        }
-
-        return track_data
+    # Check if the input is a Spotify URI
+    if search_query.startswith('spotify:track:'):
+        track_id = search_query.split(':')[2]
+        track = sp.track(track_id)
     else:
-        return None
+        # Perform a search query if it's not a URI
+        result = sp.search(q=search_query, limit=1, type='track')
+        if not result['tracks']['items']:
+            return None
+        track = result['tracks']['items'][0]
+   
+
+    # Get additional track details using the track ID
+    track_id = track['id']
+    track_details = sp.track(track_id)
+
+    # Get detailed audio features for the track
+    audio_features = sp.audio_features(track_id)[0]
+
+    # Organize the data into a dictionary
+    track_data = {
+        'artist': track['artists'][0]['name'],
+        'title': track['name'],
+        'album': track['album']['name'],
+        'release_date': track['album']['release_date'],
+        'release_date_precision': track['album']['release_date_precision'],
+        'year': track['album']['release_date'].split('-')[0],
+        'genre': sp.artist(track['artists'][0]['id'])['genres'],
+        'bpm': audio_features['tempo'],
+        'energy': audio_features['energy'],
+        'album_art_url': track['album']['images'][0]['url'] if track['album']['images'] else None,
+        # ... include other fields you're interested in
+    }
+
+    return track_data
 
 # To add the tags to the MP3 file:
 def tag_mp3(file_path, tags):
@@ -171,8 +176,6 @@ def download_from_youtube(song_input, title, artist):
         print(f"There was an error processing your request: {e}")
         return None
 
-    
-
 
 def download_album_art(album_art_url, artist, title):
     if album_art_url:
@@ -207,25 +210,56 @@ def main():
     sp = authenticate_spotipy()
     create_music_library_table()
 
-    song_input = input("Enter the song name or YouTube URL: ")
+    input_url = input("Enter the Spotify URL (track or playlist) or track name: ")
     try:
-        track_data = get_spotify_data(sp, song_input)
+        if "open.spotify.com/track/" in input_url:
+            # It's a track link
+            track_id = input_url.split("track/")[1].split("?")[0]
+            track_data = get_spotify_data(sp, 'spotify:track:' + track_id)
+            if track_data:
+                # Process the individual track
+                process_track(sp, track_data)
+        elif "open.spotify.com/playlist/" in input_url:
+            # It's a playlist link
+            playlist_id = input_url.split("playlist/")[1].split("?")[0]
+            playlist_tracks = get_playlist_tracks(sp, playlist_id)
+            for item in playlist_tracks:
+                track_data = get_spotify_data(sp, 'spotify:track:' + item['track']['id'])
+                if track_data:
+                    # Process each track in the playlist
+                    process_track(sp, track_data)
+        else:
+            # Assume it's a track name
+            track_data = get_spotify_data(sp, input_url)
+            if track_data:
+                # Process the individual track
+                process_track(sp, track_data)
     except spotipy.SpotifyException as e:
         print(f"An error occurred while fetching data from Spotify: {e}")
-        return
-
-    if track_data:
-        try:
-            track_data['art_path'] = download_album_art(track_data['album_art_url'], track_data['artist'], track_data['title'])
-            track_data['file_path'] = download_from_youtube(song_input, track_data['title'], track_data['artist'])
-
-            if track_data['file_path']:
-                tag_mp3(track_data['file_path'], track_data)
-                insert_song_to_db(track_data)
-        except (requests.exceptions.RequestException, OSError, pytube.exceptions.PytubeError) as e:
-            print(f"An error occurred: {e}")
+    except (requests.exceptions.RequestException, OSError, pytube.exceptions.PytubeError) as e:
+        print(f"An error occurred: {e}")
 
     close_db_connection()
+
+def process_track(sp, track_data):
+    track_data['art_path'] = download_album_art(track_data['album_art_url'], track_data['artist'], track_data['title'])
+    track_data['file_path'] = download_from_youtube(track_data['title'] + ' ' + track_data['artist'], track_data['title'], track_data['artist'])
+    if track_data['file_path']:
+        tag_mp3(track_data['file_path'], track_data)
+        insert_song_to_db(track_data)
+
+# Helper function to get tracks from a Spotify playlist
+def get_playlist_tracks(sp, playlist_id):
+    tracks = []
+    results = sp.playlist_tracks(playlist_id)
+    while results:
+        # Filter out empty or None track items before extending the list
+        tracks.extend([item for item in results['items'] if item['track'] is not None])
+        if results['next']:
+            results = sp.next(results)
+        else:
+            break
+    return tracks
 
 if __name__ == "__main__":
     main()
