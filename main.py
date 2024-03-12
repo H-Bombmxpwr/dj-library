@@ -45,6 +45,7 @@ def get_spotify_data(sp, search_query):
 
     # Organize the data into a dictionary
     track_data = {
+        'id': track_id,
         'artist': track['artists'][0]['name'],
         'title': track['name'],
         'album': track['album']['name'],
@@ -87,29 +88,27 @@ c = conn.cursor()
 
 # Insert a row of data
 def insert_song_to_db(track_data, playlist_id=None):
+    spotify_id = track_data['id']  # The Spotify ID of the track
     # Check if the song already exists in the database
-    c.execute("SELECT id FROM music_library WHERE title=? AND artist=?", (track_data['title'], track_data['artist']))
-    song = c.fetchone()
+    c.execute("SELECT spotify_id FROM music_library WHERE spotify_id=?", (spotify_id,))
     
-    if song is None:
-        # If the song doesn't exist, insert it and get the new song ID
-        c.execute('''INSERT INTO music_library (title, artist, year, genre, bpm, energy_level, file_path, album_art_path)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', 
-                  (track_data['title'], track_data['artist'], track_data['year'], track_data['genre'], 
-                   track_data['bpm'], track_data['energy'], track_data['file_path'], track_data['art_path']))
-        song_id = c.lastrowid
-    else:
-        # If the song exists, use the existing song ID
-        song_id = song[0]
-
+    if c.fetchone() is None:
+        # If the song doesn't exist, insert it
+        c.execute('''INSERT INTO music_library (spotify_id, title, artist, year, genre, bpm, energy_level, file_path, album_art_path)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (spotify_id, track_data['title'], track_data['artist'], track_data['year'], ", ".join(track_data['genre']), 
+                   track_data['bpm'], track_data['energy'], track_data['file_path'], track_data['art_path'] if 'art_path' in track_data else None))
+    
+    # Handle playlist association
     if playlist_id:
-        # Check if the playlist ID already exists for this song
-        c.execute("SELECT 1 FROM playlist_song WHERE song_id=? AND playlist_id=?", (song_id, playlist_id))
+        # Check if the playlist association already exists for this song
+        c.execute("SELECT 1 FROM playlist_song WHERE spotify_id=? AND playlist_id=?", (spotify_id, playlist_id))
         if c.fetchone() is None:
-            # If the playlist ID doesn't exist, insert it
-            c.execute("INSERT INTO playlist_song (song_id, playlist_id) VALUES (?, ?)", (song_id, playlist_id))
+            # If the playlist association doesn't exist, insert it
+            c.execute("INSERT INTO playlist_song (spotify_id, playlist_id) VALUES (?, ?)", (spotify_id, playlist_id))
     
     conn.commit()
+
 
 
 # Ensure that the database connection is closed properly
@@ -120,9 +119,9 @@ def close_db_connection():
 # Create the music_library table
 def create_music_library_tables():
     c.execute('''CREATE TABLE IF NOT EXISTS music_library
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, artist TEXT, year TEXT, genre TEXT, bpm INTEGER, energy_level INTEGER, file_path TEXT, album_art_path TEXT)''')
+                 (spotify_id TEXT PRIMARY KEY, title TEXT, artist TEXT, year TEXT, genre TEXT, bpm INTEGER, energy_level INTEGER, file_path TEXT, album_art_path TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS playlist_song
-                 (song_id INTEGER, playlist_id TEXT, FOREIGN KEY(song_id) REFERENCES music_library(id))''')
+                 (spotify_id TEXT, playlist_id TEXT, PRIMARY KEY (spotify_id, playlist_id), FOREIGN KEY(spotify_id) REFERENCES music_library(spotify_id))''')
     conn.commit()
 
 
