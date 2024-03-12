@@ -87,13 +87,11 @@ c = conn.cursor()
 
 # Insert a row of data
 def insert_song_to_db(song_data):
-    # Convert genre list to a string if it's not already
     genre_string = ', '.join(song_data['genre']) if isinstance(song_data['genre'], list) else song_data['genre']
     
-    # Prepare SQL statement and data
     insert_sql = """
-    INSERT INTO music_library (title, artist, year, genre, bpm, energy_level, file_path)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO music_library (title, artist, year, genre, bpm, energy_level, file_path, album_art_path)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """
     data_tuple = (
         song_data['title'],
@@ -102,7 +100,8 @@ def insert_song_to_db(song_data):
         genre_string,
         song_data['bpm'],
         song_data['energy'],
-        song_data['file_path']
+        song_data['file_path'],
+        song_data['art_path']  # Include the path to the album art
     )
 
     try:
@@ -120,7 +119,7 @@ def close_db_connection():
 # Create the music_library table
 def create_music_library_table():
     c.execute('''CREATE TABLE IF NOT EXISTS music_library
-                (title text, artist text, year text, genre text, bpm integer, energy_level integer, file_path text)''')
+                (title text, artist text, year text, genre text, bpm integer, energy_level integer, file_path text, album_art_path text)''')
     conn.commit()
 
 # To search for a song:
