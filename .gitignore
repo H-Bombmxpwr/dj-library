@@ -25,6 +25,7 @@ var/
 # Audio files and album art
 /audio/
 /album_art/
+/mp3_lib/
 
 # Cache files
 .cache/
