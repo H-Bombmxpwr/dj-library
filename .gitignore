@@ -26,6 +26,7 @@ var/
 /audio/
 /album_art/
 /mp3_lib/
+/.djenv/
 
 # Cache files
 .cache/
