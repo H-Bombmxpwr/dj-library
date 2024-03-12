@@ -86,29 +86,30 @@ conn = sqlite3.connect('dj_music_library.db')
 c = conn.cursor()
 
 # Insert a row of data
-def insert_song_to_db(song_data):
-    genre_string = ', '.join(song_data['genre']) if isinstance(song_data['genre'], list) else song_data['genre']
+def insert_song_to_db(track_data, playlist_id=None):
+    # Check if the song already exists in the database
+    c.execute("SELECT id FROM music_library WHERE title=? AND artist=?", (track_data['title'], track_data['artist']))
+    song = c.fetchone()
     
-    insert_sql = """
-    INSERT INTO music_library (title, artist, year, genre, bpm, energy_level, file_path, album_art_path)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """
-    data_tuple = (
-        song_data['title'],
-        song_data['artist'],
-        song_data['year'],
-        genre_string,
-        song_data['bpm'],
-        song_data['energy'],
-        song_data['file_path'],
-        song_data['art_path']  # Include the path to the album art
-    )
+    if song is None:
+        # If the song doesn't exist, insert it and get the new song ID
+        c.execute('''INSERT INTO music_library (title, artist, year, genre, bpm, energy_level, file_path, album_art_path)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', 
+                  (track_data['title'], track_data['artist'], track_data['year'], track_data['genre'], 
+                   track_data['bpm'], track_data['energy'], track_data['file_path'], track_data['art_path']))
+        song_id = c.lastrowid
+    else:
+        # If the song exists, use the existing song ID
+        song_id = song[0]
 
-    try:
-        c.execute(insert_sql, data_tuple)
-        conn.commit()
-    except sqlite3.Error as e:
-        print(f"An error occurred while inserting to the database: {e}")
+    if playlist_id:
+        # Check if the playlist ID already exists for this song
+        c.execute("SELECT 1 FROM playlist_song WHERE song_id=? AND playlist_id=?", (song_id, playlist_id))
+        if c.fetchone() is None:
+            # If the playlist ID doesn't exist, insert it
+            c.execute("INSERT INTO playlist_song (song_id, playlist_id) VALUES (?, ?)", (song_id, playlist_id))
+    
+    conn.commit()
 
 
 # Ensure that the database connection is closed properly
@@ -117,10 +118,15 @@ def close_db_connection():
 
 
 # Create the music_library table
-def create_music_library_table():
+def create_music_library_tables():
     c.execute('''CREATE TABLE IF NOT EXISTS music_library
-                (title text, artist text, year text, genre text, bpm integer, energy_level integer, file_path text, album_art_path text)''')
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, artist TEXT, year TEXT, genre TEXT, bpm INTEGER, energy_level INTEGER, file_path TEXT, album_art_path TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS playlist_song
+                 (song_id INTEGER, playlist_id TEXT, FOREIGN KEY(song_id) REFERENCES music_library(id))''')
     conn.commit()
+
+
+
 
 # To search for a song:
 def search_songs_by_tag(tag_name, tag_value):
@@ -129,109 +135,88 @@ def search_songs_by_tag(tag_name, tag_value):
 
 
 def download_from_youtube(song_input, title, artist):
-    youtube = None
-
-    # Use the sanitized Spotify title and artist for the filename
     safe_song_title = re.sub(r'[^\w\s-]', '', title).replace(" ", "_")
     safe_artist_name = re.sub(r'[^\w\s-]', '', artist).replace(" ", "_")
     custom_filename = f"{safe_song_title}_by_{safe_artist_name}.mp3"
-    custom_directory_path = os.path.join('audio', safe_artist_name, safe_song_title)
+    custom_directory_path = os.path.join('mp3_lib', safe_artist_name, safe_song_title)
 
     if not os.path.exists(custom_directory_path):
         os.makedirs(custom_directory_path)
 
-    try:
-        # If the input is a YouTube URL
-        if "https://www.youtube.com" in song_input:
-            youtube = YouTube(song_input)
-        else:
-            # If the input is not a YouTube URL, search for it
-            yt_search = YoutubeSearch(song_input, max_results=1).to_json()
-            yt_data = json.loads(yt_search)
-            if not yt_data['videos']:
-                print("Song not found on YouTube.")
-                return None
-            song_id = yt_data['videos'][0]['id']
-            youtube = YouTube(f"https://www.youtube.com/watch?v={song_id}")
+    mp3_path = os.path.join(custom_directory_path, custom_filename)
 
-        # Download the audio stream at the highest quality
-        audio_stream = youtube.streams.get_audio_only()
-        download_path = audio_stream.download(output_path=custom_directory_path, filename=custom_filename.replace(".mp3", ".mp4"))
+    if not os.path.exists(mp3_path):  # Check if the file already exists
+        try:
+            youtube = YouTube(song_input) if "https://www.youtube.com" in song_input else None
+            if not youtube:
+                yt_search = YoutubeSearch(song_input, max_results=1).to_json()
+                yt_data = json.loads(yt_search)
+                if not yt_data['videos']:
+                    print("Song not found on YouTube.")
+                    return None
+                youtube = YouTube(f"https://www.youtube.com/watch?v={yt_data['videos'][0]['id']}")
 
-        # Convert MP4 to MP3
-        mp4_path = download_path
-        mp3_path = os.path.join(custom_directory_path, custom_filename)
+            audio_stream = youtube.streams.get_audio_only()
+            download_path = audio_stream.download(output_path=custom_directory_path, filename=custom_filename.replace(".mp3", ".mp4"))
+            audioclip = AudioFileClip(download_path)
+            audioclip.write_audiofile(mp3_path)
+            audioclip.close()
+            os.remove(download_path)
+            print(f"Download and conversion complete. File saved as {mp3_path}")
+        except Exception as e:
+            print(f"There was an error processing your request: {e}")
+            return None
+    else:
+        print(f"File already exists: {mp3_path}")
 
-        audioclip = AudioFileClip(mp4_path)
-        audioclip.write_audiofile(mp3_path)
-
-        # Remove the original MP4 file
-        audioclip.close()
-        os.remove(mp4_path)
-
-        print(f"Download and conversion complete. File saved as {mp3_path}")
-        return mp3_path
-    except Exception as e:
-        print(f"There was an error processing your request: {e}")
-        return None
+    return mp3_path
 
 
 def download_album_art(album_art_url, artist, title):
     if album_art_url:
-        # Make the artist and title filesystem safe by removing potentially problematic characters
         safe_artist = re.sub(r'[^\w\s-]', '', artist).replace(" ", "_")
         safe_title = re.sub(r'[^\w\s-]', '', title).replace(" ", "_")
-        
-        # Determine the directory and file name for the album art
         directory_path = os.path.join('album_art', safe_artist)
         if not os.path.exists(directory_path):
             os.makedirs(directory_path)
         file_path = os.path.join(directory_path, f"{safe_title}_cover.jpg")
-        
-        # Download the image
-        response = requests.get(album_art_url)
-        if response.status_code == 200:
-            with open(file_path, 'wb') as img_file:
-                img_file.write(response.content)
-            print(f"Album art downloaded: {file_path}")
-            return file_path
+
+        if not os.path.exists(file_path):  # Check if the file already exists
+            response = requests.get(album_art_url)
+            if response.status_code == 200:
+                with open(file_path, 'wb') as img_file:
+                    img_file.write(response.content)
+                print(f"Album art downloaded: {file_path}")
         else:
-            print(f"Failed to download album art from {album_art_url}")
-            return None
+            print(f"Album art already exists: {file_path}")
+        return file_path
     else:
         print("No album art URL provided")
         return None
 
 
 
-# Main function to control the flow of the program
 def main():
     sp = authenticate_spotipy()
-    create_music_library_table()
+    create_music_library_tables()
 
     input_url = input("Enter the Spotify URL (track or playlist) or track name: ")
     try:
         if "open.spotify.com/track/" in input_url:
-            # It's a track link
             track_id = input_url.split("track/")[1].split("?")[0]
             track_data = get_spotify_data(sp, 'spotify:track:' + track_id)
             if track_data:
-                # Process the individual track
                 process_track(sp, track_data)
         elif "open.spotify.com/playlist/" in input_url:
-            # It's a playlist link
             playlist_id = input_url.split("playlist/")[1].split("?")[0]
             playlist_tracks = get_playlist_tracks(sp, playlist_id)
             for item in playlist_tracks:
                 track_data = get_spotify_data(sp, 'spotify:track:' + item['track']['id'])
                 if track_data:
-                    # Process each track in the playlist
-                    process_track(sp, track_data)
+                    process_track(sp, track_data, playlist_id)
         else:
-            # Assume it's a track name
             track_data = get_spotify_data(sp, input_url)
             if track_data:
-                # Process the individual track
                 process_track(sp, track_data)
     except spotipy.SpotifyException as e:
         print(f"An error occurred while fetching data from Spotify: {e}")
@@ -240,12 +225,15 @@ def main():
 
     close_db_connection()
 
-def process_track(sp, track_data):
+def process_track(sp, track_data, playlist_id=None):
+    # Join the genre list into a string separated by commas
+    track_data['genre'] = ', '.join(track_data['genre']) if isinstance(track_data['genre'], list) else track_data['genre']
+    
     track_data['art_path'] = download_album_art(track_data['album_art_url'], track_data['artist'], track_data['title'])
     track_data['file_path'] = download_from_youtube(track_data['title'] + ' ' + track_data['artist'], track_data['title'], track_data['artist'])
     if track_data['file_path']:
         tag_mp3(track_data['file_path'], track_data)
-        insert_song_to_db(track_data)
+        insert_song_to_db(track_data, playlist_id)
 
 # Helper function to get tracks from a Spotify playlist
 def get_playlist_tracks(sp, playlist_id):
