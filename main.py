@@ -35,7 +35,6 @@ def get_spotify_data(sp, search_query):
             return None
         track = result['tracks']['items'][0]
    
-
     # Get additional track details using the track ID
     track_id = track['id']
     track_details = sp.track(track_id)
@@ -43,6 +42,11 @@ def get_spotify_data(sp, search_query):
     # Get detailed audio features for the track
     audio_features = sp.audio_features(track_id)[0]
 
+    duration_ms = audio_features['duration_ms']
+    # Convert duration from milliseconds to MM:SS format
+    minutes, seconds = divmod(duration_ms // 1000, 60)
+    duration_str = f"{minutes}:{seconds:02d}"
+    
     # Organize the data into a dictionary
     track_data = {
         'id': track_id,
@@ -55,10 +59,11 @@ def get_spotify_data(sp, search_query):
         'genre': sp.artist(track['artists'][0]['id'])['genres'],
         'bpm': audio_features['tempo'],
         'energy': audio_features['energy'],
+        'duration': duration_str,  # Added duration in MM:SS
         'album_art_url': track['album']['images'][0]['url'] if track['album']['images'] else None,
-        # ... include other fields you're interested in
+        # ... [other fields] ...
     }
-
+    
     return track_data
 
 # To add the tags to the MP3 file:
@@ -90,13 +95,14 @@ c = conn.cursor()
 def insert_song_to_db(track_data, playlist_id=None):
     spotify_id = track_data['id']  # The Spotify ID of the track
     # Check if the song already exists in the database
+    genre_string = ", ".join(track_data['genre']) if isinstance(track_data['genre'], list) else track_data['genre']
     c.execute("SELECT spotify_id FROM music_library WHERE spotify_id=?", (spotify_id,))
     
     if c.fetchone() is None:
         # If the song doesn't exist, insert it
-        c.execute('''INSERT INTO music_library (spotify_id, title, artist, year, genre, bpm, energy_level, file_path, album_art_path)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (spotify_id, track_data['title'], track_data['artist'], track_data['year'], ", ".join(track_data['genre']), 
+        c.execute('''INSERT INTO music_library (spotify_id, title, artist, year, duration, genre, bpm, energy_level, file_path, album_art_path)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,?)''',
+                  (spotify_id, track_data['title'], track_data['artist'], track_data['year'], track_data['duration'], genre_string, 
                    track_data['bpm'], track_data['energy'], track_data['file_path'], track_data['art_path'] if 'art_path' in track_data else None))
     
     # Handle playlist association
@@ -119,7 +125,7 @@ def close_db_connection():
 # Create the music_library table
 def create_music_library_tables():
     c.execute('''CREATE TABLE IF NOT EXISTS music_library
-                 (spotify_id TEXT PRIMARY KEY, title TEXT, artist TEXT, year TEXT, genre TEXT, bpm INTEGER, energy_level INTEGER, file_path TEXT, album_art_path TEXT)''')
+                 (spotify_id TEXT PRIMARY KEY, title TEXT, artist TEXT, year TEXT,  duration TEXT, genre TEXT, bpm INTEGER, energy_level INTEGER, file_path TEXT, album_art_path TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS playlist_song
                  (spotify_id TEXT, playlist_id TEXT, PRIMARY KEY (spotify_id, playlist_id), FOREIGN KEY(spotify_id) REFERENCES music_library(spotify_id))''')
     conn.commit()
