@@ -90,4 +90,3 @@ def get_playlist_tracks(sp, playlist_id):
 
 if __name__ == "__main__":
     main()
-# Remember to close the connection when you're done
