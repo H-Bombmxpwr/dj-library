@@ -2,19 +2,24 @@
 
 A modern, parallelized Spotify playlist downloader built for DJs. Instead of using a command-line interface, this version provides an intuitive GUI to:
 
-* Paste a public Spotify playlist link
-* Download each track by locating its official audio on YouTube
-* Convert to `.mp3`, tag it with metadata (artist, title, album, year, genre)
-* Save and organize tracks by playlist
+* Paste a public Spotify playlist link  
+* Download each track by locating its official audio on YouTube  
+* Convert to `.mp3`, tag it with metadata (artist, title, album, year, genre)  
+* Save and organize tracks by playlist  
 * Run multiple sessions in parallel with live progress
+
+---
+
+![GUI Example](images/GUI_Ex.png)  
+*Example of the GUI in action downloading playlists in parallel sessions.*
 
 ---
 
 ## How It Works
 
-* `dj_gui.py` opens a GUI window.
-* Each session downloads a playlist and displays live console output and a progress bar.
-* Multiple sessions can be run simultaneously (up to 6 by default).
+* `dj_gui.py` opens a GUI window.  
+* Each session downloads a playlist and displays live console output and a progress bar.  
+* Multiple sessions can be run simultaneously (up to 6 by default).  
 * Tracks are saved in a structured format with Serato/Traktor-compatible tags.
 
 ---
@@ -26,7 +31,7 @@ A modern, parallelized Spotify playlist downloader built for DJs. Instead of usi
 ```bash
 git clone https://github.com/your-username/spotify-mp3-downloader.git
 cd spotify-mp3-downloader
-```
+````
 
 ### 2. Create a Virtual Environment
 
