@@ -17,7 +17,7 @@ def get_spotify_data(sp, search_query):
     track_details = sp.track(track_id)
 
     # Get detailed audio features for the track
-    audio_features = sp.audio_features(track_id)[0]
+    audio_features = sp.audio_features([track_id])[0]
 
     duration_ms = audio_features['duration_ms']
     # Convert duration from milliseconds to MM:SS format
@@ -43,3 +43,4 @@ def get_spotify_data(sp, search_query):
     }
     
     return track_data
+
