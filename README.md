@@ -1,6 +1,6 @@
 # Spotify Playlist MP3 Downloader
 
-This tool allows you to download songs from any public Spotify playlist as MP3 files by searching YouTube for high-quality audio, tagging them with metadata (for use in Serato and other DJ software), and saving them locally in a structured folder. Downloads run in parallel for efficiency, and a CSV tracklist is generated alongside properly tagged files.
+This script downloads all songs from a public Spotify playlist by searching YouTube for each track's official audio, downloading it as an MP3, tagging it with metadata (compatible with Serato and other DJ software), and saving them locally. All downloads are validated and run in parallel for speed.
 
 ---
 
@@ -26,27 +26,87 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 4. Authenticate with Spotify
+---
 
-Ensure you have a Spotify Developer App with a client ID and secret. The script will prompt you to log in with your Spotify account the first time you run it. Authentication is cached locally for future runs.
+## 4. Set Up Spotify API Authentication
+
+To access Spotify's playlist data, you need to authenticate via the Spotify Web API.
+
+#### Step-by-step:
+
+1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/).
+2. Log in and click "Create an App".
+3. Copy your **Client ID** and **Client Secret**.
+
+#### Create a `.env` file:
+
+Copy the example file:
+
+```bash
+cp keys.env.example .env
+```
+
+Then edit `.env` to contain your credentials:
+
+```
+SPOTIPY_CLIENT_ID='your_client_id_here'
+SPOTIPY_CLIENT_SECRET='your_client_secret_here'
+```
+
+These values are loaded automatically by the script using `python-dotenv`.
+
+---
+
+## 5. Install FFmpeg
+
+FFmpeg is required by `yt-dlp` to extract audio from YouTube videos into MP3.
+
+### macOS (using Homebrew):
+
+```bash
+brew install ffmpeg
+```
+
+### Windows:
+
+* Download FFmpeg from [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html).
+* Extract the ZIP and place it in a folder (e.g., `C:\ffmpeg\`).
+* Add `C:\ffmpeg\bin` to your system PATH:
+
+  * Search for "Environment Variables"
+  * Under "System variables", find `Path`, click Edit, and add `C:\ffmpeg\bin`.
+
+### Linux:
+
+```bash
+sudo apt update && sudo apt install ffmpeg
+```
+
+To confirm it's working:
+
+```bash
+ffmpeg -version
+```
+
+The script uses FFmpeg via `yt-dlp` for converting downloaded audio into `.mp3` format.
 
 ---
 
 ## Usage
 
-To download a playlist:
+Run the script:
 
 ```bash
 python parallel_downloader.py
 ```
 
-You’ll be prompted to enter a public Spotify playlist URL, such as:
+Paste in a Spotify playlist URL when prompted:
 
 ```
 https://open.spotify.com/playlist/390qR0tOcx0VekWOBX7RXP
 ```
 
-Then, you'll be asked how many parallel downloads to run. Press Enter to use the recommended number of threads based on your CPU.
+Then enter the number of parallel download threads (or press Enter to auto-select).
 
 ---
 
@@ -57,37 +117,28 @@ Each playlist is saved to:
 ```
 Downloaded_Music/
 └── <Playlist Name>/
-    ├── Track 1.mp3
-    ├── Track 2.mp3
+    ├── Artist - Title.mp3
+    ├── ...
     └── tracklist.csv
 ```
 
-Each MP3 is:
+Each `.mp3` is:
 
-* Named using the format `<Artist> - <Title>.mp3`
-* Tagged with ID3 metadata (artist, title, album, year, genre)
-* Validated to ensure it's playable and complete
-
----
-
-## Notes
-
-* YouTube is used as the source, and only non-remix, official-length tracks (between 90 and 600 seconds) are considered.
-* Files that already exist will not be downloaded again.
-* Corrupted or incomplete downloads are automatically removed before retrying.
+* Named `<Artist> - <Title>.mp3`
+* Tagged with artist, title, album, year, and genre
+* Verified to be valid before moving to the next song
 
 ---
 
 ## Requirements
 
-* Python 3.8 or higher
-* ffmpeg installed and available in system PATH
-* Spotify Developer account credentials (only required for initial authentication)
+* Python 3.8+
+* Spotify Developer credentials in `.env`
+* FFmpeg installed and added to system PATH
 
 ---
 
 ## License
 
-This script is intended for personal use. Be aware of and comply with YouTube’s terms of service when using this tool.
-
+For personal use only. Respect YouTube's and Spotify's terms of service when using this tool.
 
