@@ -28,6 +28,7 @@ var/
 /mp3_lib/
 /.djenv/
 /.venv/
+/.venv2/
 
 # Cache files
 .cache/
@@ -54,3 +55,6 @@ Thumbs.db
 
 POV_you_have_aux_but_dont_know_what_to_play/
 Downloaded_Music/
+
+
+ffmpeg/

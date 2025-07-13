@@ -1,6 +1,21 @@
-# Spotify Playlist MP3 Downloader
+# DJ Library Downloader (GUI Version)
 
-This script downloads all songs from a public Spotify playlist by searching YouTube for each track's official audio, downloading it as an MP3, tagging it with metadata (compatible with Serato and other DJ software), and saving them locally. All downloads are validated and run in parallel for speed.
+A modern, parallelized Spotify playlist downloader built for DJs. Instead of using a command-line interface, this version provides an intuitive GUI to:
+
+* Paste a public Spotify playlist link
+* Download each track by locating its official audio on YouTube
+* Convert to `.mp3`, tag it with metadata (artist, title, album, year, genre)
+* Save and organize tracks by playlist
+* Run multiple sessions in parallel with live progress
+
+---
+
+## How It Works
+
+* `dj_gui.py` opens a GUI window.
+* Each session downloads a playlist and displays live console output and a progress bar.
+* Multiple sessions can be run simultaneously (up to 6 by default).
+* Tracks are saved in a structured format with Serato/Traktor-compatible tags.
 
 ---
 
@@ -11,7 +26,7 @@ This script downloads all songs from a public Spotify playlist by searching YouT
 ```bash
 git clone https://github.com/your-username/spotify-mp3-downloader.git
 cd spotify-mp3-downloader
-````
+```
 
 ### 2. Create a Virtual Environment
 
@@ -28,40 +43,38 @@ pip install -r requirements.txt
 
 ---
 
-## 4. Set Up Spotify API Authentication
+## Spotify API Setup
 
-To access Spotify's playlist data, you need to authenticate via the Spotify Web API.
+This tool fetches playlist data via the Spotify Web API.
 
-#### Step-by-step:
+### Steps:
 
-1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/).
-2. Log in and click "Create an App".
-3. Copy your **Client ID** and **Client Secret**.
+1. Visit [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/)
+2. Create an app and copy:
 
-#### Create a `.env` file:
+   * `Client ID`
+   * `Client Secret`
 
-Copy the example file:
+### Create `.env` file:
 
 ```bash
 cp keys.env.example .env
 ```
 
-Then edit `.env` to contain your credentials:
+Paste your credentials inside:
 
 ```
-SPOTIPY_CLIENT_ID='your_client_id_here'
-SPOTIPY_CLIENT_SECRET='your_client_secret_here'
+SPOTIPY_CLIENT_ID='your_client_id'
+SPOTIPY_CLIENT_SECRET='your_client_secret'
 ```
-
-These values are loaded automatically by the script using `python-dotenv`.
 
 ---
 
-## 5. Install FFmpeg
+## FFmpeg Installation
 
-FFmpeg is required by `yt-dlp` to extract audio from YouTube videos into MP3.
+Required by `yt-dlp` to convert YouTube videos to MP3.
 
-### macOS (using Homebrew):
+### macOS:
 
 ```bash
 brew install ffmpeg
@@ -69,12 +82,9 @@ brew install ffmpeg
 
 ### Windows:
 
-* Download FFmpeg from [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html).
-* Extract the ZIP and place it in a folder (e.g., `C:\ffmpeg\`).
-* Add `C:\ffmpeg\bin` to your system PATH:
-
-  * Search for "Environment Variables"
-  * Under "System variables", find `Path`, click Edit, and add `C:\ffmpeg\bin`.
+* Download from: [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html)
+* Extract it to `C:\ffmpeg\`
+* Add `C:\ffmpeg\bin` to your System Environment Variables → `Path`
 
 ### Linux:
 
@@ -82,37 +92,31 @@ brew install ffmpeg
 sudo apt update && sudo apt install ffmpeg
 ```
 
-To confirm it's working:
+---
+
+## Running the GUI
+
+From the project root:
 
 ```bash
-ffmpeg -version
+python dj_gui.py
 ```
 
-The script uses FFmpeg via `yt-dlp` for converting downloaded audio into `.mp3` format.
+The GUI allows you to:
+
+* Paste in a Spotify playlist link
+* Choose number of parallel download threads (or use the default)
+* Monitor download logs and progress
+* Add or remove sessions
+* Run up to 6 sessions simultaneously
+
+Each session runs in its own subprocess and will not interfere with the others. The GUI prevents session removal while a download is active.
 
 ---
 
-## Usage
+## Output Structure
 
-Run the script:
-
-```bash
-python parallel_downloader.py
-```
-
-Paste in a Spotify playlist URL when prompted:
-
-```
-https://open.spotify.com/playlist/390qR0tOcx0VekWOBX7RXP
-```
-
-Then enter the number of parallel download threads (or press Enter to auto-select).
-
----
-
-## Output
-
-Each playlist is saved to:
+Downloaded songs are stored under:
 
 ```
 Downloaded_Music/
@@ -122,23 +126,29 @@ Downloaded_Music/
     └── tracklist.csv
 ```
 
-Each `.mp3` is:
-
-* Named `<Artist> - <Title>.mp3`
-* Tagged with artist, title, album, year, and genre
-* Verified to be valid before moving to the next song
+Each MP3 includes tags for `artist`, `title`, `album`, `year`, and `genre`, making the files compatible with Serato and other DJ software.
 
 ---
 
-## Requirements
+## Limitations
 
-* Python 3.8+
-* Spotify Developer credentials in `.env`
-* FFmpeg installed and added to system PATH
+* Requires internet access to access Spotify metadata and download from YouTube.
+* Public playlists only (no support for private playlists).
+* Search-based download means the quality of the match depends on YouTube search accuracy.
+* The GUI requires Python 3.8+ and `tkinter` (installed with most Python distributions by default).
+
+---
+
+## MP3 Tag Viewer
+
+Use `mp3_tag_viewer.py` to view existing tags on any MP3. Set the file path in the script to inspect your file:
+
+```python
+file_path = 'path/to/your/file.mp3'
+```
 
 ---
 
 ## License
 
-For personal use only. Respect YouTube's and Spotify's terms of service when using this tool.
-
+This project is intended for personal, non-commercial use. Be mindful of Spotify and YouTube terms of service when using this tool.
