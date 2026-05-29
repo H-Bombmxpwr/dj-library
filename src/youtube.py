@@ -41,9 +41,9 @@ def is_valid_video(title, duration):
     ]
     if any(bad in title for bad in banned_keywords):
         return False
-    return 90 <= duration <= 600  # 1.5 to 10 minutes
+    return 30 <= duration <= 600  # 30s to 10 minutes
 
-def search_youtube_multiple(query, fallback_limit=5):
+def search_youtube_multiple(query, fallback_limit=10):
     entries = search_youtube(query, max_results=fallback_limit)
     for video in entries:
         title = video.get("title", "")

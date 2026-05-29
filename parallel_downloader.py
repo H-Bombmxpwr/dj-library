@@ -115,14 +115,15 @@ def process_track(track, playlist_folder, writer_lock, writer):
             os.remove(downloaded_path)
             return
     else:
-        # Fallback: check any new mp3s created after time_before
+        # Fallback: look only for files whose name starts with the expected safe_name
+        safe_name_lower = safe_name.lower()
         mp3_files = [
             os.path.join(playlist_folder, f)
             for f in os.listdir(playlist_folder)
-            if f.lower().endswith(".mp3") and os.path.getctime(os.path.join(playlist_folder, f)) >= time_before
+            if f.lower().endswith(".mp3") and f.lower().startswith(safe_name_lower)
         ]
         if mp3_files:
-            downloaded_path = max(mp3_files, key=os.path.getctime)
+            downloaded_path = mp3_files[0]
             if not is_valid_mp3(downloaded_path):
                 print(f"❌ Fallback file also invalid: {downloaded_path}")
                 os.remove(downloaded_path)
