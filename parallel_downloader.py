@@ -2,18 +2,19 @@ import os
 import re
 import csv
 import multiprocessing
+import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from src.auth import authenticate_spotipy
 from src.youtube import search_youtube_multiple, download_audio_from_url, is_valid_mp3
 from spotipy.exceptions import SpotifyException
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TCON, TDRC, ID3NoHeaderError
+from mutagen.id3 import ID3, TIT2, TPE1, TALB, TCON, TDRC, TRCK, APIC, ID3NoHeaderError
 from mutagen.mp3 import MP3
 
 def clean_filename(name):
-    name = re.sub(r'[\/*?:"<>|]', '', name)  # remove illegal characters
-    name = re.sub(r'\s+', ' ', name).strip()  # normalize spaces
-    name = os.path.splitext(name)[0]  # remove any extension
+    name = re.sub(r'[\/*?:"<>|]', '', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    name = re.sub(r'\.(mp3|wav|flac|aac|ogg|m4a)$', '', name, flags=re.IGNORECASE)
     return name
 
 def normalize_mp3_extension(path):
@@ -39,7 +40,7 @@ def get_playlist_tracks(sp, playlist_id):
         results = sp.next(results) if results['next'] else None
     return tracks
 
-def tag_mp3(filepath, artist, title, album="", genre="", year=""):
+def tag_mp3(filepath, artist, title, album="", genre="", year="", track_number=None, album_art_url=None):
     try:
         audio = MP3(filepath, ID3=ID3)
     except ID3NoHeaderError:
@@ -54,6 +55,21 @@ def tag_mp3(filepath, artist, title, album="", genre="", year=""):
         audio.tags.add(TCON(encoding=3, text=[genre]))
     if year:
         audio.tags.add(TDRC(encoding=3, text=[str(year)]))
+    if track_number:
+        audio.tags.add(TRCK(encoding=3, text=[str(track_number)]))
+    if album_art_url:
+        try:
+            response = requests.get(album_art_url, timeout=10)
+            if response.status_code == 200:
+                audio.tags.add(APIC(
+                    encoding=3,
+                    mime='image/jpeg',
+                    type=3,  # front cover
+                    desc='Cover',
+                    data=response.content
+                ))
+        except Exception as e:
+            print(f"⚠️ Could not embed album art: {e}")
 
     audio.save()
     print(f"🏷️ Tagged for Serato: {title} by {artist}")
@@ -65,6 +81,9 @@ def process_track(track, playlist_folder, writer_lock, writer):
     album = track.get('album', {}).get('name', '')
     year = track.get('album', {}).get('release_date', '')[:4]
     genre = ', '.join(track.get('artists', [])[0].get('genres', [])) if 'genres' in track['artists'][0] else ''
+    track_number = track.get('track_number')
+    album_images = track.get('album', {}).get('images', [])
+    album_art_url = album_images[0]['url'] if album_images else None
 
     search_query = f"{title} {artist} official audio"
     print(f"🔎 Searching: {search_query}")
@@ -113,7 +132,7 @@ def process_track(track, playlist_folder, writer_lock, writer):
             return
 
     downloaded_path = normalize_mp3_extension(downloaded_path)
-    tag_mp3(downloaded_path, artist, title, album, genre, year)
+    tag_mp3(downloaded_path, artist, title, album, genre, year, track_number, album_art_url)
 
     with writer_lock:
         writer.writerow([artist, title, yt_url])

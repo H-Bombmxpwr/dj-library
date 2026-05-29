@@ -143,6 +143,7 @@ Each MP3 includes tags for `artist`, `title`, `album`, `year`, and `genre`, maki
 * The GUI requires Python 3.8+ and `tkinter` (installed with most Python distributions by default).
 
 ---
+# Bonus Files!
 
 ## MP3 Tag Viewer
 
@@ -153,6 +154,22 @@ file_path = 'path/to/your/file.mp3'
 ```
 
 ---
+
+
+## Decade Crate Maker
+
+`decade_crate_maker.py` organizes your downloaded MP3s into Serato-compatible crates based on either the **year** or **decade** extracted from the track’s metadata. When you run the script, it prompts you to choose a main crate name (e.g., "Country") and select one or more playlists (subfolders inside `Downloaded_Music`). It scans each selected playlist, reads the track year from ID3 tags, and generates a `.crate` file for each relevant year or decade. An empty parent crate is also created. This tool uses metadata like `date`, so accurate year tags are essential. All output crates are written to Serato’s `_Serato_/Subcrates` folder. 
+
+**NOTE: EVERYTHING IS MADE IN THE ROOT DIRECTORY. YOU HAVE TO GO AND MOVE THINGS AROUND TO MAKE CRATES INSIDE OF CRATES.**
+
+
+## BPM Crate Maker
+
+Use `bpm_crate_maker.py` to automatically sort music from selected playlists inside the `Downloaded_Music` folder into Serato-compatible BPM-based crates. When you run the script, it prompts you to enter a crate name and whether you'd like to group tracks by 10 or 20 BPM increments (e.g., 70–80 or 80–100). The script reads the BPM metadata from each track using EasyID3, assigns each track to the correct BPM range, and generates crates accordingly. Any tracks without BPM metadata are placed in a special “No BPM” crate.
+
+**NOTE: EVERYTHING IS MADE IN THE ROOT DIRECTORY. YOU HAVE TO GO AND MOVE THINGS AROUND TO MAKE CRATES INSIDE OF CRATES.**
+
+
 
 ## License
 
