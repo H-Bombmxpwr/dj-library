@@ -29,14 +29,26 @@ Before setting up the project, ensure the following are installed on your system
 ### Installing FFmpeg
 
 **macOS:**
+
+If you don't have Homebrew installed:
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+Then install FFmpeg:
 ```bash
 brew install ffmpeg
 ```
 
 **Windows:**
-1. Download from [ffmpeg.org/download.html](https://ffmpeg.org/download.html)
-2. Extract to `C:\ffmpeg\`
-3. Add `C:\ffmpeg\bin` to your System Environment Variables under `Path`
+
+FFmpeg binaries are bundled in the repo under `ffmpeg/bin/`. Add that folder to your system PATH:
+
+1. Open **System Properties** → **Environment Variables**
+2. Under **System Variables**, select `Path` and click **Edit**
+3. Add the full path to `ffmpeg\bin\` inside your cloned repo (e.g., `C:\Users\you\dj-library\ffmpeg\bin`)
+
+Alternatively, download the latest FFmpeg from [ffmpeg.org/download.html](https://ffmpeg.org/download.html) and add it to PATH manually.
 
 **Linux:**
 ```bash
@@ -130,10 +142,12 @@ Each MP3 includes ID3 tags for `artist`, `title`, `album`, `year`, and `genre`.
 
 ### MP3 Tag Viewer
 
-`mp3_tag_viewer.py` — inspect the ID3 tags on any MP3 file. Set the target path inside the script:
+`mp3_tag_viewer.py` — inspect the ID3 tags on any MP3 file.
+
+Open the script and update the hardcoded path at the top to point to the file you want to inspect:
 
 ```python
-file_path = 'path/to/your/file.mp3'
+file_path = 'Downloaded_Music/Your Playlist/Artist - Title.mp3'
 ```
 
 Then run:
