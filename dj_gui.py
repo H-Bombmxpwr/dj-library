@@ -28,6 +28,12 @@ COLORS = {
     "console_bg": "#2f2b41",
     "console_fg": "#f8f8f2",
 }
+# Label shown in the GUI -> parallel_downloader.py --existing value
+EXISTING_MODES = {
+    "Skip (keep what's there)": "skip",
+    "Upgrade old downloads": "upgrade",
+    "Redownload everything": "overwrite",
+}
 CPU = os.cpu_count() or 4
 SUGGESTED_THREADS = min(8, CPU * 2)
 MAX_THREADS = max(16, CPU * 2)
@@ -50,6 +56,14 @@ def setup_styles(root):
               indicatorcolor=[("selected", COLORS["accent"]), ("!selected", COLORS["entry_bg"])])
     style.configure("TSpinbox", fieldbackground=COLORS["entry_bg"], foreground=COLORS["fg"],
                     background=COLORS["highlight"], arrowcolor="white", bordercolor=COLORS["entry_bg"])
+    style.configure("TCombobox", fieldbackground=COLORS["entry_bg"], foreground=COLORS["fg"],
+                    background=COLORS["highlight"], arrowcolor="white", bordercolor=COLORS["entry_bg"])
+    style.map("TCombobox", fieldbackground=[("readonly", COLORS["entry_bg"])],
+              foreground=[("readonly", COLORS["fg"])], selectbackground=[("readonly", COLORS["entry_bg"])],
+              selectforeground=[("readonly", COLORS["fg"])])
+    root.option_add("*TCombobox*Listbox.background", COLORS["entry_bg"])
+    root.option_add("*TCombobox*Listbox.foreground", COLORS["fg"])
+    root.option_add("*TCombobox*Listbox.selectBackground", COLORS["highlight"])
     style.configure("Vertical.TScrollbar", background=COLORS["highlight"], troughcolor=COLORS["console_bg"],
                     bordercolor=COLORS["console_bg"], arrowcolor="white")
 
@@ -126,6 +140,18 @@ class DownloaderSession(tk.Frame):
         self.lyrics_chk = ttk.Checkbutton(opts, text="Embed lyrics", variable=self.lyrics_var)
         self.lyrics_chk.pack(side="left")
 
+        existing_row = tk.Frame(self, bg=COLORS["panel"])
+        existing_row.pack(fill="x", pady=(8, 0), **pad)
+        self.label(existing_row, "Files already in library").pack(side="left")
+        self.existing_var = tk.StringVar(value=next(iter(EXISTING_MODES)))
+        self.existing_combo = ttk.Combobox(existing_row, textvariable=self.existing_var, state="readonly",
+                                           values=list(EXISTING_MODES), width=24)
+        self.existing_combo.pack(side="left", padx=(6, 8))
+        self.existing_hint = self.label(existing_row, "", fg=COLORS["muted"], font=("Helvetica", 10))
+        self.existing_hint.pack(side="left")
+        self.existing_combo.bind("<<ComboboxSelected>>", lambda _: self.update_existing_hint())
+        self.update_existing_hint()
+
         btns = tk.Frame(self, bg=COLORS["panel"])
         btns.pack(fill="x", pady=10, **pad)
         self.start_btn = ttk.Button(btns, text="▶ Start", style="Purple.TButton", command=self.start_download)
@@ -160,6 +186,15 @@ class DownloaderSession(tk.Frame):
         self.console.tag_configure("warn", foreground=COLORS["warn"])
         self.console.tag_configure("info", foreground=COLORS["accent"])
 
+    def update_existing_hint(self):
+        hints = {
+            "skip": "only new tracks are downloaded",
+            "upgrade": "re-does files made before the v2 overhaul",
+            "overwrite": "re-does every track in the link",
+        }
+        self.existing_hint.configure(text=hints[EXISTING_MODES[self.existing_var.get()]])
+        self.existing_combo.selection_clear()
+
     def toggle_lufs(self):
         self.lufs_spin.state(["!disabled"] if self.normalize_var.get() else ["disabled"])
 
@@ -190,6 +225,7 @@ class DownloaderSession(tk.Frame):
     def set_running(self, running):
         for w in (self.start_btn, self.paste_btn, self.threads_spin, self.normalize_chk, self.lyrics_chk):
             w.state(["disabled"] if running else ["!disabled"])
+        self.existing_combo.configure(state="disabled" if running else "readonly")
         self.url_entry.configure(state="disabled" if running else "normal")
         self.stop_btn.state(["!disabled"] if running else ["disabled"])
         self.lufs_spin.state(["disabled"] if running or not self.normalize_var.get() else ["!disabled"])
@@ -214,7 +250,16 @@ class DownloaderSession(tk.Frame):
             messagebox.showerror("Invalid settings", "Threads and LUFS must be numbers.")
             return
 
-        cmd = [sys.executable, "-u", DOWNLOADER, *urls, "--gui", "-t", str(threads)]
+        existing = EXISTING_MODES[self.existing_var.get()]
+        if existing != "skip" and not messagebox.askokcancel(
+                "Replace existing files?",
+                "Matching MP3s in the library will be replaced in place (same file name, so Serato "
+                "crates keep working).\n\nCue points, loops and beatgrids saved on those files will "
+                "be lost - re-analyze them in Serato afterwards.\n\nIf a track can't be redownloaded, "
+                "the existing file is left untouched."):
+            return
+
+        cmd = [sys.executable, "-u", DOWNLOADER, *urls, "--gui", "-t", str(threads), "--existing", existing]
         if self.normalize_var.get():
             cmd += ["--target-lufs", str(lufs)]
         else:
