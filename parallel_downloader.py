@@ -1,185 +1,230 @@
+"""Download Spotify playlists/albums/tracks as tagged, loudness-normalized MP3s.
+
+    python parallel_downloader.py <spotify url> [<url> ...] [-t 8] [--target-lufs -14]
+
+Run with no URL to be prompted for one.
+"""
+import argparse
+import csv
+import json
 import os
 import re
-import csv
-import multiprocessing
-import requests
+import shutil
+import sys
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from tqdm import tqdm
-from src.auth import authenticate_spotipy
-from src.youtube import search_youtube_multiple, download_audio_from_url, is_valid_mp3
+
 from spotipy.exceptions import SpotifyException
-from mutagen.id3 import ID3, TIT2, TPE1, TALB, TCON, TDRC, TRCK, APIC, ID3NoHeaderError
-from mutagen.mp3 import MP3
+
+from src import audio, matcher, spotify, tagging
+
+OUTPUT_DIR = os.path.join(spotify.PROJECT_DIR, "Downloaded_Music")
+PARTIAL_DIR = ".partial"
+CSV_FIELDS = ["Artist", "Title", "Album", "Status", "Source", "YouTube URL", "Spotify URL",
+              "Original LUFS", "Gain dB"]
+
+_print_lock = threading.Lock()
+GUI_MODE = False
+
+
+def log(msg):
+    with _print_lock:
+        print(msg, flush=True)
+
+
+def event(kind, **data):
+    """Machine-readable line for the GUI (hidden from its console)."""
+    if GUI_MODE:
+        log("@@" + json.dumps({"event": kind, **data}))
+
+
+def suggested_threads():
+    return min(8, (os.cpu_count() or 4) * 2)
+
 
 def clean_filename(name):
     name = re.sub(r'[\/*?:"<>|]', '', name)
     name = re.sub(r'\s+', ' ', name).strip()
     name = re.sub(r'\.(mp3|wav|flac|aac|ogg|m4a)$', '', name, flags=re.IGNORECASE)
-    return name
-
-def normalize_mp3_extension(path):
-    base, ext = os.path.splitext(path)
-    while base.lower().endswith('.mp3'):
-        base = os.path.splitext(base)[0]
-    corrected_path = base + '.mp3'
-    if corrected_path != path:
-        os.rename(path, corrected_path)
-        return corrected_path
-    return path
+    return name or "Untitled"
 
 
-def get_playlist_name(sp, playlist_id):
-    playlist = sp.playlist(playlist_id)
-    return playlist['name']
+def process_track(track, folder, opts):
+    """Download one track. Returns a result dict for the tracklist CSV."""
+    name = clean_filename(f"{track.artist} - {track.title}")
+    final_path = os.path.join(folder, name + ".mp3")
+    result = {"name": name, "status": "failed", "source": "", "url": "", "lufs": "", "gain": ""}
 
-def get_playlist_tracks(sp, playlist_id):
-    tracks = []
-    results = sp.playlist_tracks(playlist_id)
-    while results:
-        tracks.extend([item['track'] for item in results['items'] if item['track']])
-        results = sp.next(results) if results['next'] else None
-    return tracks
+    match = matcher.find_best(track)
+    if not match:
+        result["status"] = "not found"
+        return result
+    result.update(source=match.source, url=match.url)
 
-def tag_mp3(filepath, artist, title, album="", genre="", year="", track_number=None, album_art_url=None):
+    stem = os.path.join(folder, PARTIAL_DIR, track.id)
+    tmp_mp3 = stem + ".tmp.mp3"
+    src = None
     try:
-        audio = MP3(filepath, ID3=ID3)
-    except ID3NoHeaderError:
-        audio = MP3(filepath)
-        audio.add_tags()
+        src = audio.download(match.url, stem)
+        gain = 0.0
+        loudness = None
+        if opts.normalize:
+            lufs, peak, seconds = audio.measure(src)
+            gain = audio.compute_gain(lufs, peak, opts.target_lufs)
+            if lufs is not None:
+                loudness = (lufs, gain)
+                result.update(lufs=f"{lufs:.1f}", gain=f"{gain:+.1f}")
+            if seconds and track.duration and abs(seconds - track.duration) > 15:
+                log(f"⚠️  Length differs from Spotify by {abs(seconds - track.duration):.0f}s: {name}")
+        audio.encode_mp3(src, tmp_mp3, gain)
+        lyrics = tagging.fetch_lyrics(track) if opts.lyrics else ""
+        tagging.tag_mp3(tmp_mp3, track, match.url, lyrics, loudness)
+        os.replace(tmp_mp3, final_path)  # atomic: never leaves a half-written MP3
+        result["status"] = "downloaded"
+    except Exception as e:
+        result["error"] = str(e).splitlines()[0][:200] if str(e) else type(e).__name__
+    finally:
+        for path in (src, tmp_mp3):
+            if path and os.path.exists(path):
+                os.remove(path)
+    return result
 
-    audio.tags.add(TPE1(encoding=3, text=[artist]))
-    audio.tags.add(TIT2(encoding=3, text=[title]))
-    if album:
-        audio.tags.add(TALB(encoding=3, text=[album]))
-    if genre:
-        audio.tags.add(TCON(encoding=3, text=[genre]))
-    if year:
-        audio.tags.add(TDRC(encoding=3, text=[str(year)]))
-    if track_number:
-        audio.tags.add(TRCK(encoding=3, text=[str(track_number)]))
-    if album_art_url:
+
+def _read_previous_csv(path):
+    rows = {}
+    if os.path.exists(path):
         try:
-            response = requests.get(album_art_url, timeout=10)
-            if response.status_code == 200:
-                audio.tags.add(APIC(
-                    encoding=3,
-                    mime='image/jpeg',
-                    type=3,  # front cover
-                    desc='Cover',
-                    data=response.content
-                ))
-        except Exception as e:
-            print(f"⚠️ Could not embed album art: {e}")
+            with open(path, newline="", encoding="utf-8") as f:
+                for row in csv.DictReader(f):
+                    rows[(row.get("Artist"), row.get("Title"))] = row
+        except (OSError, csv.Error):
+            pass
+    return rows
 
-    audio.save()
-    print(f"🏷️ Tagged for Serato: {title} by {artist}")
 
-def process_track(track, playlist_folder, writer_lock, writer):
-    import time
-    title = track['name']
-    artist = track['artists'][0]['name']
-    album = track.get('album', {}).get('name', '')
-    year = track.get('album', {}).get('release_date', '')[:4]
-    genre = ', '.join(track.get('artists', [])[0].get('genres', [])) if 'genres' in track['artists'][0] else ''
-    track_number = track.get('track_number')
-    album_images = track.get('album', {}).get('images', [])
-    album_art_url = album_images[0]['url'] if album_images else None
+def _write_csv(path, tracks, results):
+    previous = _read_previous_csv(path)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
+        writer.writeheader()
+        for t in tracks:
+            r = results.get(t.id, {})
+            old = previous.get((t.artist, t.title), {})
+            status = r.get("status", "")
+            writer.writerow({
+                "Artist": t.artist, "Title": t.title, "Album": t.album,
+                "Status": status if status != "exists" else (old.get("Status") or "downloaded"),
+                "Source": r.get("source") or old.get("Source", ""),
+                "YouTube URL": r.get("url") or old.get("YouTube URL", ""),
+                "Spotify URL": t.url,
+                "Original LUFS": r.get("lufs") or old.get("Original LUFS", ""),
+                "Gain dB": r.get("gain") or old.get("Gain dB", ""),
+            })
+        # Keep rows for tracks downloaded earlier that aren't in this link (e.g. Singles)
+        current = {(t.artist, t.title) for t in tracks}
+        for key, row in previous.items():
+            if key not in current:
+                writer.writerow({k: row.get(k, "") for k in CSV_FIELDS})
 
-    search_query = f"{title} {artist} official audio"
-    print(f"🔎 Searching: {search_query}")
 
-    video_info = search_youtube_multiple(search_query)
-    if not video_info:
-        print(f"❌ No results found for {title} by {artist}")
-        return
+def download_collection(sp, url, opts):
+    log("🔗 Reading Spotify link...")
+    name, tracks = spotify.fetch(sp, url)
+    folder_name = clean_filename(name)
+    folder = os.path.join(opts.output, folder_name)
+    partial = os.path.join(folder, PARTIAL_DIR)
+    shutil.rmtree(partial, ignore_errors=True)  # leftovers from a stopped run
+    os.makedirs(partial, exist_ok=True)
 
-    yt_title = video_info['title']
-    yt_url = video_info['webpage_url']
-
-    base_filename = f"{artist} - {title}"
-    safe_name = clean_filename(base_filename)
-    expected_path = os.path.join(playlist_folder, safe_name + ".mp3")
-
-    if os.path.exists(expected_path):
-        print(f"✅ Already downloaded: {os.path.basename(expected_path)}")
-        return
-
-    print(f"⬇️ Downloading: {safe_name}.mp3 ({yt_title})")
-    time_before = time.time()
-    downloaded_path = download_audio_from_url(yt_url, os.path.join(playlist_folder, safe_name))
-
-    # yt-dlp should now return path with .mp3 appended
-    if downloaded_path and os.path.exists(downloaded_path):
-        if not is_valid_mp3(downloaded_path):
-            print(f"❌ Corrupted or invalid MP3 detected: {downloaded_path}")
-            os.remove(downloaded_path)
-            return
-    else:
-        # Fallback: look only for files whose name starts with the expected safe_name
-        safe_name_lower = safe_name.lower()
-        mp3_files = [
-            os.path.join(playlist_folder, f)
-            for f in os.listdir(playlist_folder)
-            if f.lower().endswith(".mp3") and f.lower().startswith(safe_name_lower)
-        ]
-        if mp3_files:
-            downloaded_path = mp3_files[0]
-            if not is_valid_mp3(downloaded_path):
-                print(f"❌ Fallback file also invalid: {downloaded_path}")
-                os.remove(downloaded_path)
-                return
+    # Skip files that already exist and duplicate entries before doing any network work
+    results, todo, seen = {}, [], set()
+    for t in tracks:
+        fname = clean_filename(f"{t.artist} - {t.title}")
+        if fname.lower() in seen:
+            results[t.id] = {"status": "duplicate"}
+            continue
+        seen.add(fname.lower())
+        if os.path.exists(os.path.join(folder, fname + ".mp3")):
+            results[t.id] = {"status": "exists"}
         else:
-            print(f"⚠️ No file found after fallback for {title} by {artist}")
-            return
+            todo.append(t)
 
-    downloaded_path = normalize_mp3_extension(downloaded_path)
-    tag_mp3(downloaded_path, artist, title, album, genre, year, track_number, album_art_url)
+    existing = len(tracks) - len(todo)
+    log(f"🎵 {name}: {len(tracks)} tracks ({existing} already in library, {len(todo)} to download)")
+    event("start", playlist=name, folder=folder, total=len(tracks), existing=existing)
 
-    with writer_lock:
-        writer.writerow([artist, title, yt_url])
+    counts = {"downloaded": 0, "failed": 0}
+    started = time.time()
+    try:
+        with ThreadPoolExecutor(max_workers=max(1, opts.threads)) as pool:
+            futures = {pool.submit(process_track, t, folder, opts): t for t in todo}
+            for done, future in enumerate(as_completed(futures), 1):
+                t = futures[future]
+                try:
+                    r = future.result()
+                except Exception as e:
+                    r = {"name": f"{t.artist} - {t.title}", "status": "failed", "error": str(e)}
+                results[t.id] = r
+                prefix = f"[{done}/{len(todo)}]"
+                if r["status"] == "downloaded":
+                    counts["downloaded"] += 1
+                    gain = f", {r['gain']} dB" if r.get("gain") else ""
+                    log(f"{prefix} ✅ {r['name']}  ({r['source']}{gain})")
+                elif r["status"] == "not found":
+                    counts["failed"] += 1
+                    log(f"{prefix} ❌ No clean match found: {r['name']}")
+                else:
+                    counts["failed"] += 1
+                    log(f"{prefix} ❌ Failed: {r['name']} - {r.get('error', 'unknown error')}")
+                event("progress", done=done, total=len(todo), **counts)
+    finally:
+        _write_csv(os.path.join(folder, "tracklist.csv"), tracks, results)
+        shutil.rmtree(partial, ignore_errors=True)
 
-    print(f"✅ Downloaded and tagged: {os.path.basename(downloaded_path)}")
+    elapsed = time.time() - started
+    log(f"🏁 {name}: {counts['downloaded']} downloaded, {existing} already had, "
+        f"{counts['failed']} failed in {elapsed:.0f}s")
+    failed = [r["name"] for r in results.values() if r.get("status") in ("failed", "not found")]
+    if failed:
+        log("   Not downloaded:\n   - " + "\n   - ".join(failed))
+    event("done", **counts, existing=existing)
 
 
+def main():
+    global GUI_MODE
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("urls", nargs="*", help="Spotify playlist, album or track links")
+    parser.add_argument("-t", "--threads", type=int, default=suggested_threads(),
+                        help=f"parallel downloads (default {suggested_threads()})")
+    parser.add_argument("--target-lufs", type=float, default=audio.DEFAULT_TARGET_LUFS,
+                        help=f"loudness target (default {audio.DEFAULT_TARGET_LUFS})")
+    parser.add_argument("--no-normalize", dest="normalize", action="store_false",
+                        help="keep original loudness")
+    parser.add_argument("--no-lyrics", dest="lyrics", action="store_false", help="skip embedding lyrics")
+    parser.add_argument("-o", "--output", default=OUTPUT_DIR, help="output folder")
+    parser.add_argument("--gui", action="store_true", help=argparse.SUPPRESS)
+    opts = parser.parse_args()
+    GUI_MODE = opts.gui
 
-def download_playlist(sp, playlist_url):
-    playlist_id = playlist_url.split("playlist/")[1].split("?")[0]
-    playlist_name = clean_filename(get_playlist_name(sp, playlist_id))
-    base_folder = os.path.join(os.getcwd(), "Downloaded_Music")
-    playlist_folder = os.path.join(base_folder, playlist_name)
-    os.makedirs(playlist_folder, exist_ok=True)
-
-    csv_path = os.path.join(playlist_folder, 'tracklist.csv')
-    writer_lock = multiprocessing.Lock()
-
-    with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(['Artist', 'Title', 'YouTube URL'])
-
-        tracks = get_playlist_tracks(sp, playlist_id)
-        print(f"🎵 Found {len(tracks)} tracks in playlist: {playlist_name}")
-
-        core_count = multiprocessing.cpu_count()
-        suggested_workers = min(10, core_count * 2)
+    urls = opts.urls or input("Enter Spotify playlist/album/track URL: ").split()
+    sp = spotify.authenticate()
+    exit_code = 0
+    for url in urls:
         try:
-            max_workers = int(input(f"\n🧐 Detected {core_count} CPU cores. Suggested max threads: {suggested_workers}\nHow many downloads should run in parallel? [Press Enter for suggested]: ") or suggested_workers)
-        except ValueError:
-            max_workers = suggested_workers
+            download_collection(sp, url, opts)
+        except SpotifyException as e:
+            log(f"❌ Spotify API error for {url}: {e.msg if hasattr(e, 'msg') else e}")
+            exit_code = 1
+        except ValueError as e:
+            log(f"❌ {e}")
+            exit_code = 1
+    sys.exit(exit_code)
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(process_track, track, playlist_folder, writer_lock, writer)
-                for track in tracks
-            ]
-            for _ in tqdm(as_completed(futures), total=len(futures), desc="📅 Downloading"):
-                pass
 
 if __name__ == "__main__":
-    sp = authenticate_spotipy()
-    url = input("Enter Spotify playlist URL: ").strip()
     try:
-        download_playlist(sp, url)
-    except SpotifyException as e:
-        print(f"❌ Spotify API error: {e}")
-    except Exception as e:
-        print(f"❌ General error: {e}")
+        main()
+    except KeyboardInterrupt:
+        log("\n⏹️  Stopped.")
+        sys.exit(130)

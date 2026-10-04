@@ -10,12 +10,14 @@ DOWNLOADED_MUSIC = Path("Downloaded_Music")
 SERATO_CRATES = Path.home() / "Music" / "_Serato_" / "Subcrates"
 
 def extract_decade(year_str):
-    if year_str and re.match(r"^\d{4}$", year_str):
+    year_str = (year_str or "")[:4]  # tags may hold a full YYYY-MM-DD date
+    if re.match(r"^\d{4}$", year_str):
         return year_str[:3] + "0s"
     return None
 
 def extract_year(year_str):
-    if year_str and re.match(r"^\d{4}$", year_str):
+    year_str = (year_str or "")[:4]
+    if re.match(r"^\d{4}$", year_str):
         return year_str
     return None
 

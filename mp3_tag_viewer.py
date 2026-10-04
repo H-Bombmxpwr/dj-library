@@ -1,15 +1,29 @@
+"""Print the ID3 tags on one or more MP3 files.
 
-#run this on an mp3 to see the metadata and what tags are on it
+    uv run mp3_tag_viewer.py "Downloaded_Music/<Playlist>/<Artist - Title>.mp3"
+"""
+import sys
 
 from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, ID3NoHeaderError
 
-file_path = "Downloaded_Music/POV you have aux but don't know what to play/50 Cent - In Da Club.mp3"
 
-try:
-    audio = MP3(file_path, ID3=ID3)
-    print(f"Tags in {file_path}:")
-    for tag in audio.tags.keys():
-        print(f"{tag}: {audio.tags[tag]}")
-except ID3NoHeaderError:
-    print(f"No ID3 tags found in {file_path}")
+def show(path):
+    audio = MP3(path)
+    print(f"\n{path}")
+    print(f"  {audio.info.bitrate // 1000} kbps, {audio.info.sample_rate} Hz, {audio.info.length:.1f}s")
+    if not audio.tags:
+        print("  (no ID3 tags)")
+        return
+    for key, frame in sorted(audio.tags.items()):
+        if key.startswith("APIC"):
+            value = f"<{frame.mime}, {len(frame.data) // 1024} KB>"
+        else:
+            value = str(frame).replace("\n", " / ")
+        print(f"  {key:32} {value[:100]}")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        sys.exit(__doc__)
+    for p in sys.argv[1:]:
+        show(p)

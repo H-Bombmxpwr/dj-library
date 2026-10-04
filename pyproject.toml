@@ -1,0 +1,19 @@
+[project]
+name = "dj-library"
+version = "2.0.0"
+description = "Download Spotify playlists as clean, loudness-normalized, fully tagged MP3s for DJ practice."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mutagen>=1.47",
+    "python-dotenv>=1.0",
+    "requests>=2.31",
+    "serato-crate>=0.0.1",
+    "spotipy>=2.23",
+    "tqdm>=4.66",
+    "yt-dlp[default]>=2026.8.19",
+    "ytmusicapi>=1.10",
+]
+
+[tool.uv]
+package = false

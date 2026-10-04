@@ -1,201 +1,176 @@
 # DJ Library Downloader
 
-A parallelized Spotify playlist downloader built for DJs. Provide a public Spotify playlist URL and the tool will locate each track on YouTube, download it, convert it to `.mp3`, and tag it with full metadata — artist, title, album, year, and genre — in a format compatible with Serato, Traktor, and other DJ software.
-
----
+A personal tool for building a DJ practice library from Spotify. Give it a Spotify playlist, album or track link and it finds the official studio audio on YouTube Music, then saves it as a 320 kbps MP3 with matched loudness and full ID3 metadata. Serato, Traktor, rekordbox and CDJs can read the files directly.
 
 ![GUI Example](images/GUI_Ex.png)
-*Multiple download sessions running in parallel via the GUI.*
 
 ---
 
 ## Features
 
-- Paste any public Spotify playlist link and download all tracks automatically
-- Parallel download sessions (up to 6 simultaneous) with live progress and console output
-- MP3 files tagged with Serato/Traktor-compatible ID3 metadata
-- Tracks organized by playlist into a clean folder structure
-- Bonus scripts for organizing your library into Serato crates by decade or BPM
+- **Clean audio sources.** Tracks are matched to the label's official Art Tracks on YouTube Music: studio audio with no music-video intros, skits or sound effects. Every match must agree with Spotify on title, artist and duration (within a few seconds). If no Art Track exists, the tool falls back to Topic-channel uploads, official audio and lyric videos, and music videos rank last.
+- **Matched loudness without extra quality loss.** Each track is measured (EBU R128) and set to a common target, −14 LUFS by default, in the same encode that produces the MP3. The adjustment is a plain volume change: no compression, no limiting, and peaks are capped at −1 dBTP, so it can't introduce clipping.
+- **Full metadata.** Title, all artists, album, album artist, full release date, track and disc number, genre, record label, ISRC, copyright, explicit/clean flag, lyrics, high-resolution cover art, plus links back to the Spotify and YouTube sources.
+- **Fast parallel downloads.** Several tracks download at once, and Spotify metadata is fetched in batches. Tracks already in your library are skipped before any network calls, so re-running a playlist only picks up new additions.
+- **Safe to stop.** Files are written atomically, so stopping a download never leaves a half-written MP3 that looks complete.
+- **Multi-session GUI.** Run up to six downloads side by side, each with its own progress, ETA and color-coded log.
 
 ---
 
-## Prerequisites
+## Requirements
 
-Before setting up the project, ensure the following are installed on your system:
+| Tool | Purpose | Install |
+|------|---------|---------|
+| [uv](https://docs.astral.sh/uv/) | Python and dependency management | `brew install uv` or see the [uv docs](https://docs.astral.sh/uv/getting-started/installation/) |
+| [FFmpeg](https://ffmpeg.org/) | Audio decoding, loudness analysis, MP3 encoding | `brew install ffmpeg` (macOS) · `sudo apt install ffmpeg` (Linux) |
+| Spotify API credentials | Playlist and track metadata | See [Configuration](#configuration) |
 
-- **Python 3.8+** — [python.org](https://www.python.org/downloads/)
-- **FFmpeg** — required by `yt-dlp` to convert audio
+uv installs a suitable Python version automatically if you don't have one.
 
-### Installing FFmpeg
-
-**macOS:**
-
-If you don't have Homebrew installed:
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-Then install FFmpeg:
-```bash
-brew install ffmpeg
-```
-
-**Windows:**
-
-FFmpeg binaries are bundled in the repo under `ffmpeg/bin/`. Add that folder to your system PATH:
-
-1. Open **System Properties** → **Environment Variables**
-2. Under **System Variables**, select `Path` and click **Edit**
-3. Add the full path to `ffmpeg\bin\` inside your cloned repo (e.g., `C:\Users\you\dj-library\ffmpeg\bin`)
-
-Alternatively, download the latest FFmpeg from [ffmpeg.org/download.html](https://ffmpeg.org/download.html) and add it to PATH manually.
-
-**Linux:**
-```bash
-sudo apt update && sudo apt install ffmpeg
-```
+**Windows:** FFmpeg binaries can be placed in `ffmpeg/bin/` inside the project, and the tool will find them automatically. You can also install FFmpeg system-wide and add it to `PATH`.
 
 ---
 
 ## Setup
 
-### 1. Clone the Repository
-
 ```bash
 git clone https://github.com/hunterbaisden/dj-library.git
 cd dj-library
+uv sync
 ```
 
-### 2. Create and Activate a Virtual Environment
+`uv sync` creates `.venv/` and installs the exact versions pinned in `uv.lock`.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate      # macOS / Linux
-# .venv\Scripts\activate       # Windows
-```
+### Configuration
 
-### 3. Install Python Dependencies
+1. Open the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/) and create an app.
+2. Copy its **Client ID** and **Client Secret**.
+3. Create your credentials file:
 
-```bash
-pip install -r requirements.txt
-```
+   ```bash
+   cp keys.env.example keys.env
+   ```
 
-### 4. Configure Spotify API Credentials
+4. Fill in `keys.env`:
 
-This tool uses the Spotify Web API to fetch playlist and track metadata.
+   ```
+   SPOTIPY_CLIENT_ID='your_client_id_here'
+   SPOTIPY_CLIENT_SECRET='your_client_secret_here'
+   ```
 
-1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard/) and log in
-2. Click **Create App** and fill in a name and description
-3. Copy your **Client ID** and **Client Secret**
-4. Copy the example credentials file:
-
-```bash
-cp keys.env.example keys.env
-```
-
-5. Open `keys.env` and replace the placeholder values with your credentials:
-
-```
-SPOTIPY_CLIENT_ID='your_client_id_here'
-SPOTIPY_CLIENT_SECRET='your_client_secret_here'
-```
-
-> `keys.env` is loaded at runtime — do not rename it.
+`keys.env` is git-ignored and loaded from the project root.
 
 ---
 
-## Running the Application
+## Usage
 
-From the project root (with your virtual environment active):
+### GUI
 
 ```bash
-python dj_gui.py
+uv run dj_gui.py
 ```
 
-The GUI lets you:
+Paste one or more Spotify links into a session (separate multiple links with spaces to download them one after another) and press **Start** or Enter. Each session has these options:
 
-- Paste a Spotify playlist URL into a session
-- Set the number of parallel download threads
-- Monitor live download logs and a progress bar per session
-- Add or remove sessions (removal is blocked while a download is active)
-- Run up to 6 sessions simultaneously
+| Option | Default | Description |
+|--------|---------|-------------|
+| Parallel downloads | 2 × CPU cores, max 8 | Number of tracks processed at once |
+| Normalize to … LUFS | On, −14 | Target loudness. Turn it off to keep the original levels |
+| Embed lyrics | On | Fetches plain-text lyrics from [LRCLIB](https://lrclib.net) |
+
+**Open Folder** opens that session's output folder, and **Open Library** opens `Downloaded_Music/`.
+
+### Command line
+
+```bash
+uv run parallel_downloader.py "https://open.spotify.com/playlist/..."
+```
+
+| Flag | Description |
+|------|-------------|
+| `-t, --threads N` | Parallel downloads |
+| `--target-lufs X` | Loudness target (default −14) |
+| `--no-normalize` | Keep original loudness |
+| `--no-lyrics` | Skip lyrics |
+| `-o, --output DIR` | Output folder (default `Downloaded_Music/`) |
+
+You can pass several links in one command. If you pass none, the script prompts for one.
 
 ---
 
-## Output Structure
-
-Downloaded tracks are saved under `Downloaded_Music/`:
+## Output
 
 ```
 Downloaded_Music/
-└── <Playlist Name>/
-    ├── Artist - Title.mp3
-    ├── ...
-    └── tracklist.csv
+├── <Playlist Name>/
+│   ├── <Artist> - <Title>.mp3
+│   └── tracklist.csv
+├── <Artist> - <Album>/        # album links
+└── Singles/                   # single-track links
 ```
 
-Each MP3 includes ID3 tags for `artist`, `title`, `album`, `year`, and `genre`.
+`tracklist.csv` lists every track with its status (`downloaded`, `not found`, `failed`, `duplicate`), the source it was taken from, its YouTube URL, its original loudness and the gain that was applied. Use it to spot tracks that need attention.
+
+### Audio format
+
+320 kbps CBR MP3 with ID3v2.3 tags, the most widely compatible combination for DJ software and hardware.
+
+### Embedded tags
+
+| Frame | Content |
+|-------|---------|
+| `TIT2` / `TPE1` / `TPE2` | Title, all artists, album artist |
+| `TALB` / `TDRC` | Album, release date |
+| `TRCK` / `TPOS` | Track number (`n/total`), disc number |
+| `TCON` | Genre (from the artists' Spotify genres) |
+| `TPUB` / `TCOP` / `TSRC` | Record label, copyright, ISRC |
+| `COMM` / `TXXX:ITUNESADVISORY` | `Explicit` or `Clean` |
+| `USLT` | Lyrics |
+| `APIC` | Front cover (highest resolution available) |
+| `WOAF` / `WOAS` | Spotify track URL, YouTube source URL |
+| `TXXX:LOUDNESS_*` | Original loudness and gain applied |
+
+Spotify no longer gives new API apps access to BPM or musical key. Let your DJ software analyze those.
 
 ---
 
-## Bonus Tools
+## Utilities
 
-### MP3 Tag Viewer
-
-`mp3_tag_viewer.py` — inspect the ID3 tags on any MP3 file.
-
-Open the script and update the hardcoded path at the top to point to the file you want to inspect:
-
-```python
-file_path = 'Downloaded_Music/Your Playlist/Artist - Title.mp3'
-```
-
-Then run:
+### Crate makers (Serato)
 
 ```bash
-python mp3_tag_viewer.py
+uv run decade_crate_maker.py   # crates by year or decade
+uv run bpm_crate_maker.py      # crates by BPM range (requires BPM tags, e.g. after Serato analysis)
+```
+
+Both prompt you for a crate name and the playlists to include, then write crates to `~/Music/_Serato_/Subcrates`. Serato doesn't support nested crates through the file structure, so all crates are created at the root level. Arrange them in Serato afterwards.
+
+### Tag viewer
+
+```bash
+uv run mp3_tag_viewer.py "Downloaded_Music/<Playlist>/<Artist - Title>.mp3"
 ```
 
 ---
 
-### Decade Crate Maker
+## Maintenance
 
-`decade_crate_maker.py` — organizes your downloaded tracks into Serato-compatible crates grouped by year or decade.
+YouTube changes often, and an outdated `yt-dlp` is the most common cause of `HTTP Error 403` download failures. To update it:
 
-When run, the script prompts you to:
-1. Choose a main crate name (e.g., `Hip-Hop`)
-2. Select one or more playlists from `Downloaded_Music/`
-3. Choose grouping by **year** or **decade**
-
-Crate files are written to Serato's `_Serato_/Subcrates` folder. An empty parent crate is created automatically.
-
-> **Note:** Serato does not support nested crates natively via file structure. All crates are created at the root level — you will need to manually arrange subcrates within Serato after generation.
-
----
-
-### BPM Crate Maker
-
-`bpm_crate_maker.py` — sorts tracks from selected playlists into Serato-compatible crates grouped by BPM range.
-
-When run, the script prompts you to:
-1. Enter a crate name
-2. Choose a BPM grouping increment (10 or 20 BPM)
-
-Tracks without BPM metadata are placed in a `No BPM` crate.
-
-> **Note:** Same nested crate limitation as above — all crates are written to the root level in Serato.
+```bash
+uv lock --upgrade-package yt-dlp && uv sync
+```
 
 ---
 
 ## Limitations
 
-- Requires an active internet connection for Spotify metadata lookups and YouTube downloads
-- Only works with **public** Spotify playlists
-- Match quality depends on YouTube search accuracy — results may occasionally differ from the Spotify version
-- `tkinter` is required for the GUI and is included with most standard Python installations
+- Works only with public Spotify playlists. Spotify-curated editorial playlists may not be available to new API apps.
+- Tracks with no official upload, such as obscure covers or regional exclusives, are reported as *not found* instead of being replaced with a guess.
+- Requires an internet connection for Spotify, YouTube and lyrics lookups.
 
 ---
 
 ## License
 
-This project is intended for personal, non-commercial use. Please be mindful of Spotify's and YouTube's terms of service when using this tool.
+For personal, non-commercial use only. Respect the terms of service of Spotify, YouTube and the rights holders of the music you download.
